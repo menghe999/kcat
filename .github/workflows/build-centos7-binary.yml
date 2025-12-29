@@ -17,7 +17,7 @@ on:
 jobs:
   build-centos7-static:
     name: Build Static Binary for CentOS 7 (x86_64)
-    runs-on: ubuntu-20.04  # Use Ubuntu 20.04 which has older GLIBC, closer to CentOS 7
+    runs-on: ubuntu-latest
     
     steps:
     - name: Checkout repository
@@ -40,7 +40,8 @@ jobs:
           libsasl2-dev \
           zlib1g-dev \
           libcurl4-openssl-dev \
-          python3
+          python3 \
+          binutils
     
     - name: Build static kcat binary
       run: |
