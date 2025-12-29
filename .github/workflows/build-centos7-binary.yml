@@ -123,19 +123,19 @@ jobs:
         ls -lh release/lib/
         
         # Create wrapper script
-        cat > release/kcat << 'WRAPPER_EOF'
-#!/bin/bash
-# kcat wrapper script with bundled dependencies
-
-# Get the directory where this script is located
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Set LD_LIBRARY_PATH to include our bundled libraries
-export LD_LIBRARY_PATH="${SCRIPT_DIR}/lib:${LD_LIBRARY_PATH}"
-
-# Execute the actual kcat binary with all arguments
-exec "${SCRIPT_DIR}/bin/kcat" "$@"
-WRAPPER_EOF
+        cat > release/kcat << 'EOF'
+        #!/bin/bash
+        # kcat wrapper script with bundled dependencies
+        
+        # Get the directory where this script is located
+        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        
+        # Set LD_LIBRARY_PATH to include our bundled libraries
+        export LD_LIBRARY_PATH="${SCRIPT_DIR}/lib:${LD_LIBRARY_PATH}"
+        
+        # Execute the actual kcat binary with all arguments
+        exec "${SCRIPT_DIR}/bin/kcat" "$@"
+        EOF
         
         chmod +x release/kcat
         
@@ -143,38 +143,38 @@ WRAPPER_EOF
         VERSION=$(./kcat -V 2>&1 | head -1 | awk '{print $2}')
         
         # Create version info file
-        cat > release/VERSION.txt << EOF
-kcat Portable Binary for CentOS 7
-==================================
-Version: ${VERSION}
-Build Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-Git Commit: ${GITHUB_SHA:0:8}
-Git Branch: ${GITHUB_REF#refs/heads/}
-Architecture: x86_64
-Package Type: Portable (with bundled dependencies)
-
-This package includes kcat and all required shared libraries,
-making it portable across CentOS 7 and compatible systems.
-
-System Requirements:
-- CentOS 7 / RHEL 7 or compatible (x86_64)
-- Linux kernel 3.10 or later
-- Basic system libraries (glibc, libm, libpthread, etc.)
-
-Quick Start:
-  tar -xzf kcat-centos7-portable-*.tar.gz
-  cd kcat-centos7-portable
-  ./kcat -V
-
-Installation (optional):
-  sudo ./install.sh
-
-The wrapper script automatically sets LD_LIBRARY_PATH to use
-the bundled libraries, so no system-wide installation is required.
-
-For full documentation, visit:
-https://github.com/edenhill/kcat
-EOF
+        cat > release/VERSION.txt << 'EOF'
+        kcat Portable Binary for CentOS 7
+        ==================================
+        Version: ${VERSION}
+        Build Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+        Git Commit: ${GITHUB_SHA:0:8}
+        Git Branch: ${GITHUB_REF#refs/heads/}
+        Architecture: x86_64
+        Package Type: Portable (with bundled dependencies)
+        
+        This package includes kcat and all required shared libraries,
+        making it portable across CentOS 7 and compatible systems.
+        
+        System Requirements:
+        - CentOS 7 / RHEL 7 or compatible (x86_64)
+        - Linux kernel 3.10 or later
+        - Basic system libraries (glibc, libm, libpthread, etc.)
+        
+        Quick Start:
+          tar -xzf kcat-centos7-portable-*.tar.gz
+          cd kcat-centos7-portable
+          ./kcat -V
+        
+        Installation (optional):
+          sudo ./install.sh
+        
+        The wrapper script automatically sets LD_LIBRARY_PATH to use
+        the bundled libraries, so no system-wide installation is required.
+        
+        For full documentation, visit:
+        https://github.com/edenhill/kcat
+        EOF
         
         # Copy documentation
         cp README.md release/
@@ -182,169 +182,169 @@ EOF
         [ -f kcat.1 ] && cp kcat.1 release/ || true
         
         # Create installation script
-        cat > release/install.sh << 'INSTALLEOF'
-#!/bin/bash
-set -e
-
-INSTALL_DIR="/usr/local"
-PACKAGE_NAME="kcat"
-
-echo "=========================================="
-echo "kcat Portable Installation Script"
-echo "=========================================="
-echo ""
-
-# Check if running as root
-if [ "$EUID" -ne 0 ]; then
-  echo "❌ Error: This script must be run as root or with sudo"
-  echo "   Usage: sudo ./install.sh"
-  exit 1
-fi
-
-# Check if files exist
-if [ ! -f "kcat" ] || [ ! -f "bin/kcat" ]; then
-  echo "❌ Error: kcat files not found in current directory"
-  exit 1
-fi
-
-# Backup old version if exists
-if [ -d "$INSTALL_DIR/$PACKAGE_NAME" ]; then
-  echo "📦 Backing up existing installation to ${INSTALL_DIR}/${PACKAGE_NAME}.backup"
-  rm -rf "$INSTALL_DIR/${PACKAGE_NAME}.backup"
-  mv "$INSTALL_DIR/$PACKAGE_NAME" "$INSTALL_DIR/${PACKAGE_NAME}.backup"
-fi
-
-# Create installation directory
-echo "📥 Installing kcat to $INSTALL_DIR/$PACKAGE_NAME..."
-mkdir -p "$INSTALL_DIR/$PACKAGE_NAME"
-
-# Copy all files
-cp -r bin lib kcat "$INSTALL_DIR/$PACKAGE_NAME/"
-[ -f VERSION.txt ] && cp VERSION.txt "$INSTALL_DIR/$PACKAGE_NAME/" || true
-[ -f README.md ] && cp README.md "$INSTALL_DIR/$PACKAGE_NAME/" || true
-[ -f LICENSE ] && cp LICENSE "$INSTALL_DIR/$PACKAGE_NAME/" || true
-
-# Create symlink in /usr/local/bin
-echo "🔗 Creating symlink in /usr/local/bin..."
-ln -sf "$INSTALL_DIR/$PACKAGE_NAME/kcat" /usr/local/bin/kcat
-
-# Verify installation
-if [ -x "/usr/local/bin/kcat" ]; then
-  echo ""
-  echo "✅ Installation successful!"
-  echo ""
-  echo "Installed version:"
-  /usr/local/bin/kcat -V
-  echo ""
-  echo "You can now run 'kcat' from anywhere."
-  echo "Try: kcat -h"
-  echo ""
-  echo "Installation location: $INSTALL_DIR/$PACKAGE_NAME"
-else
-  echo "❌ Installation failed"
-  exit 1
-fi
-INSTALLEOF
+        cat > release/install.sh << 'EOF'
+        #!/bin/bash
+        set -e
+        
+        INSTALL_DIR="/usr/local"
+        PACKAGE_NAME="kcat"
+        
+        echo "=========================================="
+        echo "kcat Portable Installation Script"
+        echo "=========================================="
+        echo ""
+        
+        # Check if running as root
+        if [ "$EUID" -ne 0 ]; then
+          echo "Error: This script must be run as root or with sudo"
+          echo "   Usage: sudo ./install.sh"
+          exit 1
+        fi
+        
+        # Check if files exist
+        if [ ! -f "kcat" ] || [ ! -f "bin/kcat" ]; then
+          echo "Error: kcat files not found in current directory"
+          exit 1
+        fi
+        
+        # Backup old version if exists
+        if [ -d "$INSTALL_DIR/$PACKAGE_NAME" ]; then
+          echo "Backing up existing installation to ${INSTALL_DIR}/${PACKAGE_NAME}.backup"
+          rm -rf "$INSTALL_DIR/${PACKAGE_NAME}.backup"
+          mv "$INSTALL_DIR/$PACKAGE_NAME" "$INSTALL_DIR/${PACKAGE_NAME}.backup"
+        fi
+        
+        # Create installation directory
+        echo "Installing kcat to $INSTALL_DIR/$PACKAGE_NAME..."
+        mkdir -p "$INSTALL_DIR/$PACKAGE_NAME"
+        
+        # Copy all files
+        cp -r bin lib kcat "$INSTALL_DIR/$PACKAGE_NAME/"
+        [ -f VERSION.txt ] && cp VERSION.txt "$INSTALL_DIR/$PACKAGE_NAME/" || true
+        [ -f README.md ] && cp README.md "$INSTALL_DIR/$PACKAGE_NAME/" || true
+        [ -f LICENSE ] && cp LICENSE "$INSTALL_DIR/$PACKAGE_NAME/" || true
+        
+        # Create symlink in /usr/local/bin
+        echo "Creating symlink in /usr/local/bin..."
+        ln -sf "$INSTALL_DIR/$PACKAGE_NAME/kcat" /usr/local/bin/kcat
+        
+        # Verify installation
+        if [ -x "/usr/local/bin/kcat" ]; then
+          echo ""
+          echo "Installation successful!"
+          echo ""
+          echo "Installed version:"
+          /usr/local/bin/kcat -V
+          echo ""
+          echo "You can now run 'kcat' from anywhere."
+          echo "Try: kcat -h"
+          echo ""
+          echo "Installation location: $INSTALL_DIR/$PACKAGE_NAME"
+        else
+          echo "Installation failed"
+          exit 1
+        fi
+        EOF
         
         chmod +x release/install.sh
         
         # Create uninstall script
-        cat > release/uninstall.sh << 'UNINSTALLEOF'
-#!/bin/bash
-set -e
-
-INSTALL_DIR="/usr/local"
-PACKAGE_NAME="kcat"
-
-if [ "$EUID" -ne 0 ]; then
-  echo "❌ Error: This script must be run as root or with sudo"
-  exit 1
-fi
-
-echo "🗑️  Uninstalling kcat..."
-
-# Remove symlink
-if [ -L "/usr/local/bin/kcat" ]; then
-  rm -f /usr/local/bin/kcat
-  echo "  Removed symlink: /usr/local/bin/kcat"
-fi
-
-# Remove installation directory
-if [ -d "$INSTALL_DIR/$PACKAGE_NAME" ]; then
-  rm -rf "$INSTALL_DIR/$PACKAGE_NAME"
-  echo "  Removed directory: $INSTALL_DIR/$PACKAGE_NAME"
-fi
-
-echo "✅ kcat has been uninstalled"
-UNINSTALLEOF
+        cat > release/uninstall.sh << 'EOF'
+        #!/bin/bash
+        set -e
+        
+        INSTALL_DIR="/usr/local"
+        PACKAGE_NAME="kcat"
+        
+        if [ "$EUID" -ne 0 ]; then
+          echo "Error: This script must be run as root or with sudo"
+          exit 1
+        fi
+        
+        echo "Uninstalling kcat..."
+        
+        # Remove symlink
+        if [ -L "/usr/local/bin/kcat" ]; then
+          rm -f /usr/local/bin/kcat
+          echo "  Removed symlink: /usr/local/bin/kcat"
+        fi
+        
+        # Remove installation directory
+        if [ -d "$INSTALL_DIR/$PACKAGE_NAME" ]; then
+          rm -rf "$INSTALL_DIR/$PACKAGE_NAME"
+          echo "  Removed directory: $INSTALL_DIR/$PACKAGE_NAME"
+        fi
+        
+        echo "kcat has been uninstalled"
+        EOF
         
         chmod +x release/uninstall.sh
         
         # Create README
-        cat > release/README_INSTALL.txt << 'READMEEOF'
-kcat - CentOS 7 Portable Package
-=================================
-
-此压缩包包含 kcat 及其所有依赖库，可在 CentOS 7 离线环境直接使用。
-
-文件说明：
----------
-kcat            - 包装脚本（自动设置库路径）
-bin/kcat        - 实际的二进制文件
-lib/            - 所有依赖的共享库
-install.sh      - 安装脚本（安装到 /usr/local）
-uninstall.sh    - 卸载脚本
-VERSION.txt     - 版本和构建信息
-README.md       - 完整文档
-LICENSE         - 许可证
-
-使用方法：
----------
-
-方式 1: 直接运行（推荐，无需安装）
-$ ./kcat -V
-$ ./kcat -b broker:9092 -L
-
-方式 2: 安装到系统
-$ sudo ./install.sh
-$ kcat -V
-
-卸载：
-$ sudo ./uninstall.sh
-
-工作原理：
----------
-kcat 包装脚本会自动设置 LD_LIBRARY_PATH 环境变量，
-使程序使用 lib/ 目录中的共享库，而不是系统库。
-这样就不需要在系统中安装任何依赖。
-
-常用命令示例：
--------------
-# 查看版本
-./kcat -V
-
-# 列出集群元数据
-./kcat -b broker:9092 -L
-
-# 消费消息
-./kcat -b broker:9092 -t my-topic -C
-
-# 生产消息
-echo "hello world" | ./kcat -b broker:9092 -t my-topic -P
-
-# 查看帮助
-./kcat -h
-
-故障排除：
----------
-如果遇到 "error while loading shared libraries" 错误：
-1. 确保使用包装脚本 ./kcat 而不是 bin/kcat
-2. 检查 lib/ 目录中的库文件是否完整
-3. 尝试手动设置：export LD_LIBRARY_PATH=$(pwd)/lib:$LD_LIBRARY_PATH
-
-更多信息请查看 README.md 或访问：
-https://github.com/edenhill/kcat
-READMEEOF
+        cat > release/README_INSTALL.txt << 'EOF'
+        kcat - CentOS 7 Portable Package
+        =================================
+        
+        This package contains kcat and all required dependencies for CentOS 7.
+        
+        Files:
+        ---------
+        kcat            - Wrapper script (auto-sets library path)
+        bin/kcat        - Actual binary file
+        lib/            - All required shared libraries
+        install.sh      - Installation script (installs to /usr/local)
+        uninstall.sh    - Uninstallation script
+        VERSION.txt     - Version and build information
+        README.md       - Full documentation
+        LICENSE         - License
+        
+        Usage:
+        ---------
+        
+        Method 1: Direct run (recommended, no installation needed)
+        $ ./kcat -V
+        $ ./kcat -b broker:9092 -L
+        
+        Method 2: Install to system
+        $ sudo ./install.sh
+        $ kcat -V
+        
+        Uninstall:
+        $ sudo ./uninstall.sh
+        
+        How it works:
+        ---------
+        The kcat wrapper script automatically sets LD_LIBRARY_PATH to use
+        the bundled libraries instead of system libraries, so no system
+        dependencies need to be installed.
+        
+        Common commands:
+        -------------
+        # Check version
+        ./kcat -V
+        
+        # List cluster metadata
+        ./kcat -b broker:9092 -L
+        
+        # Consume messages
+        ./kcat -b broker:9092 -t my-topic -C
+        
+        # Produce messages
+        echo "hello world" | ./kcat -b broker:9092 -t my-topic -P
+        
+        # Show help
+        ./kcat -h
+        
+        Troubleshooting:
+        ---------
+        If you encounter "error while loading shared libraries":
+        1. Make sure to use the wrapper script ./kcat not bin/kcat
+        2. Check that lib/ directory contains all library files
+        3. Try manually setting: export LD_LIBRARY_PATH=$(pwd)/lib:$LD_LIBRARY_PATH
+        
+        For more information see README.md or visit:
+        https://github.com/edenhill/kcat
+        EOF
         
         # Create the tarball
         cd release
