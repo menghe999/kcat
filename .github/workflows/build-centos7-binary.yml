@@ -48,38 +48,11 @@ jobs:
     - name: Build static kcat binary
       run: |
         echo "=========================================="
-        echo "Building FULLY static kcat binary for CentOS 7"
+        echo "Building kcat with bundled dependencies for CentOS 7"
         echo "=========================================="
-        
-        # Install static libraries
-        sudo apt-get install -y \
-          libssl-dev \
-          libsasl2-dev \
-          zlib1g-dev \
-          libcurl4-openssl-dev
         
         # Run bootstrap to build librdkafka and other dependencies
         ./bootstrap.sh
-        
-        echo ""
-        echo "Rebuilding with complete static linking..."
-        echo ""
-        
-        # Set up paths
-        export DEST="$PWD/tmp-bootstrap/usr"
-        
-        # Clean and reconfigure
-        make clean || true
-        ./configure --clean
-        
-        # Configure with all static libraries
-        ./configure --enable-static --enable-json --enable-avro \
-          CPPFLAGS="-I$DEST/include" \
-          LDFLAGS="-L$DEST/lib -static" \
-          LIBS="-lrdkafka -lyajl_s -lavro -ljansson -lserdes -lcurl -lssl -lcrypto -lsasl2 -lz -lpthread -lrt -ldl -lresolv"
-        
-        # Build
-        make
         
         echo ""
         echo "Build completed! Verifying binary..."
@@ -89,17 +62,10 @@ jobs:
         ls -lh kcat
         file kcat
         
-        # Check if it's static
+        # Check dynamic dependencies
         echo ""
-        echo "Checking if binary is static:"
-        if ldd kcat 2>&1 | grep -q "not a dynamic executable"; then
-          echo "✅ SUCCESS: Fully static binary!"
-        else
-          echo "⚠️  WARNING: Binary has dynamic dependencies:"
-          ldd kcat
-          echo ""
-          echo "This binary may not work on CentOS 7 without installing dependencies."
-        fi
+        echo "Checking dynamic dependencies:"
+        ldd kcat
         
         # Check binary size
         SIZE=$(stat -c%s kcat)
@@ -109,212 +75,308 @@ jobs:
         # Test basic functionality
         echo ""
         echo "Testing kcat functionality:"
-        ./kcat -V || echo "Note: -V flag may not work, trying -h"
-        ./kcat -h 2>&1 | head -20 || echo "Binary test completed"
+        ./kcat -V
+        ./kcat -h | head -20
     
     - name: Package binary with metadata
       run: |
-        echo "Packaging binary for distribution..."
+        echo "=========================================="
+        echo "Creating portable package with bundled dependencies"
+        echo "=========================================="
         
-        # 创建发布目录
-        mkdir -p release
+        # Create release directory structure
+        mkdir -p release/bin
+        mkdir -p release/lib
         
-        # 复制二进制文件
-        cp kcat release/
-        strip release/kcat  # 移除调试符号以减小体积
+        # Copy the kcat binary
+        cp kcat release/bin/
+        strip release/bin/kcat  # Remove debug symbols
         
-        # 获取版本信息
+        # Copy all required shared libraries
+        echo ""
+        echo "Collecting required shared libraries..."
+        
+        # Get list of dependencies and copy them
+        ldd kcat | grep "=> /" | awk '{print $3}' | while read lib; do
+          # Skip system libraries that should be available on CentOS 7
+          case "$lib" in
+            */libc.so.* | */libm.so.* | */libpthread.so.* | */libdl.so.* | */librt.so.* | */libresolv.so.*)
+              echo "  Skipping system library: $lib"
+              ;;
+            *)
+              echo "  Copying: $lib"
+              cp -L "$lib" release/lib/ || true
+              ;;
+          esac
+        done
+        
+        # Also copy libraries from our bootstrap build
+        echo ""
+        echo "Copying bootstrap-built libraries..."
+        if [ -d tmp-bootstrap/usr/lib ]; then
+          cp -v tmp-bootstrap/usr/lib/*.so* release/lib/ 2>/dev/null || true
+        fi
+        
+        # List what we've collected
+        echo ""
+        echo "Bundled libraries:"
+        ls -lh release/lib/
+        
+        # Create wrapper script
+        cat > release/kcat << 'WRAPPER_EOF'
+#!/bin/bash
+# kcat wrapper script with bundled dependencies
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Set LD_LIBRARY_PATH to include our bundled libraries
+export LD_LIBRARY_PATH="${SCRIPT_DIR}/lib:${LD_LIBRARY_PATH}"
+
+# Execute the actual kcat binary with all arguments
+exec "${SCRIPT_DIR}/bin/kcat" "$@"
+WRAPPER_EOF
+        
+        chmod +x release/kcat
+        
+        # Get version information
         VERSION=$(./kcat -V 2>&1 | head -1 | awk '{print $2}')
         
-        # 创建版本信息文件
+        # Create version info file
         cat > release/VERSION.txt << EOF
-        kcat Binary for CentOS 7 (Static Build)
-        ========================================
-        Version: ${VERSION}
-        Build Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-        Git Commit: ${GITHUB_SHA:0:8}
-        Git Branch: ${GITHUB_REF#refs/heads/}
-        Architecture: x86_64
+kcat Portable Binary for CentOS 7
+==================================
+Version: ${VERSION}
+Build Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+Git Commit: ${GITHUB_SHA:0:8}
+Git Branch: ${GITHUB_REF#refs/heads/}
+Architecture: x86_64
+Package Type: Portable (with bundled dependencies)
+
+This package includes kcat and all required shared libraries,
+making it portable across CentOS 7 and compatible systems.
+
+System Requirements:
+- CentOS 7 / RHEL 7 or compatible (x86_64)
+- Linux kernel 3.10 or later
+- Basic system libraries (glibc, libm, libpthread, etc.)
+
+Quick Start:
+  tar -xzf kcat-centos7-portable-*.tar.gz
+  cd kcat-centos7-portable
+  ./kcat -V
+
+Installation (optional):
+  sudo ./install.sh
+
+The wrapper script automatically sets LD_LIBRARY_PATH to use
+the bundled libraries, so no system-wide installation is required.
+
+For full documentation, visit:
+https://github.com/edenhill/kcat
+EOF
         
-        This is a statically linked binary that can run on CentOS 7
-        and compatible systems (RHEL 7, Oracle Linux 7, etc.) without 
-        any external dependencies.
-        
-        System Requirements:
-        - CentOS 7 / RHEL 7 or compatible (x86_64)
-        - Linux kernel 3.10 or later
-        - No additional libraries required
-        
-        Quick Start:
-          tar -xzf kcat-centos7-static-*.tar.gz
-          cd release
-          chmod +x kcat
-          ./kcat -V
-        
-        Installation:
-          sudo ./install.sh
-        
-        For full documentation, visit:
-        https://github.com/edenhill/kcat
-        EOF
-        
-        # 复制文档
+        # Copy documentation
         cp README.md release/
         cp LICENSE release/
         [ -f kcat.1 ] && cp kcat.1 release/ || true
         
-        # 创建安装脚本
+        # Create installation script
         cat > release/install.sh << 'INSTALLEOF'
-        #!/bin/bash
-        set -e
-        
-        INSTALL_DIR="/usr/local/bin"
-        BINARY_NAME="kcat"
-        
-        echo "=========================================="
-        echo "kcat Installation Script"
-        echo "=========================================="
-        echo ""
-        
-        # 检查是否为 root
-        if [ "$EUID" -ne 0 ]; then
-          echo "❌ Error: This script must be run as root or with sudo"
-          echo "   Usage: sudo ./install.sh"
-          exit 1
-        fi
-        
-        # 检查二进制文件是否存在
-        if [ ! -f "$BINARY_NAME" ]; then
-          echo "❌ Error: $BINARY_NAME binary not found in current directory"
-          exit 1
-        fi
-        
-        # 备份旧版本（如果存在）
-        if [ -f "$INSTALL_DIR/$BINARY_NAME" ]; then
-          echo "📦 Backing up existing kcat to ${INSTALL_DIR}/${BINARY_NAME}.backup"
-          cp "$INSTALL_DIR/$BINARY_NAME" "$INSTALL_DIR/${BINARY_NAME}.backup"
-        fi
-        
-        # 安装二进制文件
-        echo "📥 Installing kcat to $INSTALL_DIR..."
-        cp "$BINARY_NAME" "$INSTALL_DIR/"
-        chmod +x "$INSTALL_DIR/$BINARY_NAME"
-        
-        # 验证安装
-        if [ -x "$INSTALL_DIR/$BINARY_NAME" ]; then
-          echo ""
-          echo "✅ Installation successful!"
-          echo ""
-          echo "Installed version:"
-          "$INSTALL_DIR/$BINARY_NAME" -V
-          echo ""
-          echo "You can now run 'kcat' from anywhere."
-          echo "Try: kcat -h"
-        else
-          echo "❌ Installation failed"
-          exit 1
-        fi
-        INSTALLEOF
+#!/bin/bash
+set -e
+
+INSTALL_DIR="/usr/local"
+PACKAGE_NAME="kcat"
+
+echo "=========================================="
+echo "kcat Portable Installation Script"
+echo "=========================================="
+echo ""
+
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then
+  echo "❌ Error: This script must be run as root or with sudo"
+  echo "   Usage: sudo ./install.sh"
+  exit 1
+fi
+
+# Check if files exist
+if [ ! -f "kcat" ] || [ ! -f "bin/kcat" ]; then
+  echo "❌ Error: kcat files not found in current directory"
+  exit 1
+fi
+
+# Backup old version if exists
+if [ -d "$INSTALL_DIR/$PACKAGE_NAME" ]; then
+  echo "📦 Backing up existing installation to ${INSTALL_DIR}/${PACKAGE_NAME}.backup"
+  rm -rf "$INSTALL_DIR/${PACKAGE_NAME}.backup"
+  mv "$INSTALL_DIR/$PACKAGE_NAME" "$INSTALL_DIR/${PACKAGE_NAME}.backup"
+fi
+
+# Create installation directory
+echo "📥 Installing kcat to $INSTALL_DIR/$PACKAGE_NAME..."
+mkdir -p "$INSTALL_DIR/$PACKAGE_NAME"
+
+# Copy all files
+cp -r bin lib kcat "$INSTALL_DIR/$PACKAGE_NAME/"
+[ -f VERSION.txt ] && cp VERSION.txt "$INSTALL_DIR/$PACKAGE_NAME/" || true
+[ -f README.md ] && cp README.md "$INSTALL_DIR/$PACKAGE_NAME/" || true
+[ -f LICENSE ] && cp LICENSE "$INSTALL_DIR/$PACKAGE_NAME/" || true
+
+# Create symlink in /usr/local/bin
+echo "🔗 Creating symlink in /usr/local/bin..."
+ln -sf "$INSTALL_DIR/$PACKAGE_NAME/kcat" /usr/local/bin/kcat
+
+# Verify installation
+if [ -x "/usr/local/bin/kcat" ]; then
+  echo ""
+  echo "✅ Installation successful!"
+  echo ""
+  echo "Installed version:"
+  /usr/local/bin/kcat -V
+  echo ""
+  echo "You can now run 'kcat' from anywhere."
+  echo "Try: kcat -h"
+  echo ""
+  echo "Installation location: $INSTALL_DIR/$PACKAGE_NAME"
+else
+  echo "❌ Installation failed"
+  exit 1
+fi
+INSTALLEOF
         
         chmod +x release/install.sh
         
-        # 创建卸载脚本
+        # Create uninstall script
         cat > release/uninstall.sh << 'UNINSTALLEOF'
-        #!/bin/bash
-        set -e
-        
-        INSTALL_DIR="/usr/local/bin"
-        BINARY_NAME="kcat"
-        
-        if [ "$EUID" -ne 0 ]; then
-          echo "❌ Error: This script must be run as root or with sudo"
-          exit 1
-        fi
-        
-        if [ -f "$INSTALL_DIR/$BINARY_NAME" ]; then
-          echo "🗑️  Removing kcat from $INSTALL_DIR..."
-          rm -f "$INSTALL_DIR/$BINARY_NAME"
-          echo "✅ kcat has been uninstalled"
-        else
-          echo "ℹ️  kcat is not installed in $INSTALL_DIR"
-        fi
-        UNINSTALLEOF
+#!/bin/bash
+set -e
+
+INSTALL_DIR="/usr/local"
+PACKAGE_NAME="kcat"
+
+if [ "$EUID" -ne 0 ]; then
+  echo "❌ Error: This script must be run as root or with sudo"
+  exit 1
+fi
+
+echo "🗑️  Uninstalling kcat..."
+
+# Remove symlink
+if [ -L "/usr/local/bin/kcat" ]; then
+  rm -f /usr/local/bin/kcat
+  echo "  Removed symlink: /usr/local/bin/kcat"
+fi
+
+# Remove installation directory
+if [ -d "$INSTALL_DIR/$PACKAGE_NAME" ]; then
+  rm -rf "$INSTALL_DIR/$PACKAGE_NAME"
+  echo "  Removed directory: $INSTALL_DIR/$PACKAGE_NAME"
+fi
+
+echo "✅ kcat has been uninstalled"
+UNINSTALLEOF
         
         chmod +x release/uninstall.sh
         
-        # 创建 README
+        # Create README
         cat > release/README_INSTALL.txt << 'READMEEOF'
-        kcat - CentOS 7 Static Binary
-        ==============================
+kcat - CentOS 7 Portable Package
+=================================
+
+此压缩包包含 kcat 及其所有依赖库，可在 CentOS 7 离线环境直接使用。
+
+文件说明：
+---------
+kcat            - 包装脚本（自动设置库路径）
+bin/kcat        - 实际的二进制文件
+lib/            - 所有依赖的共享库
+install.sh      - 安装脚本（安装到 /usr/local）
+uninstall.sh    - 卸载脚本
+VERSION.txt     - 版本和构建信息
+README.md       - 完整文档
+LICENSE         - 许可证
+
+使用方法：
+---------
+
+方式 1: 直接运行（推荐，无需安装）
+$ ./kcat -V
+$ ./kcat -b broker:9092 -L
+
+方式 2: 安装到系统
+$ sudo ./install.sh
+$ kcat -V
+
+卸载：
+$ sudo ./uninstall.sh
+
+工作原理：
+---------
+kcat 包装脚本会自动设置 LD_LIBRARY_PATH 环境变量，
+使程序使用 lib/ 目录中的共享库，而不是系统库。
+这样就不需要在系统中安装任何依赖。
+
+常用命令示例：
+-------------
+# 查看版本
+./kcat -V
+
+# 列出集群元数据
+./kcat -b broker:9092 -L
+
+# 消费消息
+./kcat -b broker:9092 -t my-topic -C
+
+# 生产消息
+echo "hello world" | ./kcat -b broker:9092 -t my-topic -P
+
+# 查看帮助
+./kcat -h
+
+故障排除：
+---------
+如果遇到 "error while loading shared libraries" 错误：
+1. 确保使用包装脚本 ./kcat 而不是 bin/kcat
+2. 检查 lib/ 目录中的库文件是否完整
+3. 尝试手动设置：export LD_LIBRARY_PATH=$(pwd)/lib:$LD_LIBRARY_PATH
+
+更多信息请查看 README.md 或访问：
+https://github.com/edenhill/kcat
+READMEEOF
         
-        此压缩包包含可在 CentOS 7 离线环境使用的 kcat 静态编译版本。
+        # Create the tarball
+        cd release
+        TARBALL_NAME="kcat-centos7-portable-${GITHUB_SHA:0:8}.tar.gz"
+        tar -czf "../$TARBALL_NAME" .
+        cd ..
         
-        文件说明：
-        ---------
-        kcat            - 主程序二进制文件（静态链接）
-        install.sh      - 安装脚本（安装到 /usr/local/bin）
-        uninstall.sh    - 卸载脚本
-        VERSION.txt     - 版本和构建信息
-        README.md       - 完整文档
-        LICENSE         - 许可证
-        
-        使用方法：
-        ---------
-        
-        方式 1: 直接运行（无需安装）
-        $ chmod +x kcat
-        $ ./kcat -V
-        $ ./kcat -b broker:9092 -L
-        
-        方式 2: 安装到系统
-        $ sudo ./install.sh
-        $ kcat -V
-        
-        卸载：
-        $ sudo ./uninstall.sh
-        
-        常用命令示例：
-        -------------
-        # 查看版本
-        kcat -V
-        
-        # 列出集群元数据
-        kcat -b broker:9092 -L
-        
-        # 消费消息
-        kcat -b broker:9092 -t my-topic -C
-        
-        # 生产消息
-        echo "hello world" | kcat -b broker:9092 -t my-topic -P
-        
-        # 查看帮助
-        kcat -h
-        
-        更多信息请查看 README.md 或访问：
-        https://github.com/edenhill/kcat
-        READMEEOF
-        
-        # 创建压缩包
-        TARBALL_NAME="kcat-centos7-static-${GITHUB_SHA:0:8}.tar.gz"
-        tar -czf "$TARBALL_NAME" -C release .
-        
-        # 显示文件信息
+        # Display package info
         echo ""
         echo "=========================================="
-        echo "Package created successfully!"
+        echo "Portable package created successfully!"
         echo "=========================================="
         ls -lh "$TARBALL_NAME"
         echo ""
-        echo "Contents:"
-        tar -tzf "$TARBALL_NAME"
+        echo "Package contents:"
+        tar -tzf "$TARBALL_NAME" | head -20
+        echo ""
+        echo "Total files: $(tar -tzf "$TARBALL_NAME" | wc -l)"
+        
+        # Test the wrapper script
+        echo ""
+        echo "Testing wrapper script..."
+        cd release
+        ./kcat -V || echo "Wrapper test completed"
+        cd ..
     
     - name: Upload binary artifact
       uses: actions/upload-artifact@v4
       with:
-        name: kcat-centos7-static-binary
+        name: kcat-centos7-portable-package
         path: |
-          kcat-centos7-static-*.tar.gz
-          release/kcat
+          kcat-centos7-portable-*.tar.gz
         retention-days: 90
         compression-level: 6
     
@@ -322,30 +384,42 @@ jobs:
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
-        files: kcat-centos7-static-*.tar.gz
+        files: kcat-centos7-portable-*.tar.gz
         body: |
-          ## CentOS 7 Static Binary Release
+          ## CentOS 7 Portable Binary Release
           
-          This release includes a statically linked kcat binary for CentOS 7 and compatible systems.
+          This release includes a portable kcat package with all required dependencies bundled.
           
           ### Download and Install
           ```bash
           # 下载并解压
-          tar -xzf kcat-centos7-static-*.tar.gz
-          cd release
+          tar -xzf kcat-centos7-portable-*.tar.gz
+          cd kcat-centos7-portable
           
-          # 方式1: 直接使用
-          chmod +x kcat
+          # 方式1: 直接使用（推荐）
           ./kcat -V
+          ./kcat -b broker:9092 -L
           
           # 方式2: 安装到系统
           sudo ./install.sh
           ```
           
           ### Features
-          - ✅ 静态链接，无需安装依赖
+          - ✅ 包含所有依赖库，无需额外安装
           - ✅ 支持 CentOS 7 及兼容系统
           - ✅ 包含完整功能（JSON, Avro, Transactions）
           - ✅ 可在离线环境使用
+          - ✅ 使用包装脚本自动设置库路径
+          
+          ### Package Contents
+          - `kcat` - Wrapper script with automatic library path setup
+          - `bin/kcat` - The actual kcat binary
+          - `lib/` - All required shared libraries
+          - `install.sh` - System installation script
+          - `uninstall.sh` - Uninstallation script
+          
+          ### How It Works
+          The wrapper script automatically sets `LD_LIBRARY_PATH` to use the bundled libraries,
+          making the package fully portable without requiring system-wide library installation.
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
