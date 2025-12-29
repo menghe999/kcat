@@ -22,9 +22,30 @@ jobs:
       image: centos:7
     
     steps:
+    - name: Fix CentOS 7 EOL repository issues
+      run: |
+        # CentOS 7 已经 EOL，需要切换到 vault 镜像源
+        sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*.repo
+        sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*.repo
+        
+        # 清理缓存
+        yum clean all
+        yum makecache
+    
     - name: Install build dependencies
       run: |
+        # 安装 EPEL
         yum install -y epel-release
+        
+        # 修复 EPEL 镜像源
+        sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/epel*.repo
+        sed -i 's|#baseurl=http://download.fedoraproject.org/pub|baseurl=http://archives.fedoraproject.org/pub|g' /etc/yum.repos.d/epel*.repo
+        
+        # 再次清理缓存
+        yum clean all
+        yum makecache
+        
+        # 安装构建依赖
         yum install -y \
           gcc \
           gcc-c++ \
