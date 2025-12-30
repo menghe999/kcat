@@ -18,32 +18,43 @@ jobs:
   build-centos7-static:
     name: Build Static Binary for CentOS 7 (x86_64)
     runs-on: ubuntu-latest
+    container:
+      image: centos:7
     
     steps:
+    - name: Install build dependencies in CentOS 7
+      run: |
+        # Update yum and install EPEL
+        yum install -y epel-release
+        yum update -y
+        
+        # Install build tools
+        yum install -y \
+          gcc \
+          gcc-c++ \
+          make \
+          cmake3 \
+          git \
+          wget \
+          curl \
+          which \
+          file \
+          tar \
+          gzip \
+          bzip2 \
+          python3 \
+          openssl-devel \
+          cyrus-sasl-devel \
+          zlib-devel \
+          libcurl-devel
+        
+        # Create cmake symlink
+        ln -sf /usr/bin/cmake3 /usr/bin/cmake || true
+    
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
         fetch-depth: 1
-    
-    - name: Install build dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          gcc \
-          g++ \
-          make \
-          cmake \
-          git \
-          wget \
-          curl \
-          libssl-dev \
-          libsasl2-dev \
-          zlib1g-dev \
-          libcurl4-openssl-dev \
-          python3 \
-          binutils \
-          libsasl2-modules \
-          libsasl2-modules-gssapi-mit
     
     - name: Build static kcat binary
       run: |
@@ -81,57 +92,28 @@ jobs:
     - name: Package binary with metadata
       run: |
         echo "=========================================="
-        echo "Creating portable package with bundled dependencies"
+        echo "Creating portable package"
         echo "=========================================="
         
         # Create release directory structure
         mkdir -p release/bin
-        mkdir -p release/lib
         
         # Copy the kcat binary
         cp kcat release/bin/
         strip release/bin/kcat  # Remove debug symbols
         
-        # Copy all required shared libraries
+        # Verify it's using CentOS 7 GLIBC
         echo ""
-        echo "Collecting required shared libraries..."
-        
-        # Get list of dependencies and copy them
-        ldd kcat | grep "=> /" | awk '{print $3}' | while read lib; do
-          # Skip system libraries that should be available on CentOS 7
-          case "$lib" in
-            */libc.so.* | */libm.so.* | */libpthread.so.* | */libdl.so.* | */librt.so.* | */libresolv.so.*)
-              echo "  Skipping system library: $lib"
-              ;;
-            *)
-              echo "  Copying: $lib"
-              cp -L "$lib" release/lib/ || true
-              ;;
-          esac
-        done
-        
-        # Also copy libraries from our bootstrap build
-        echo ""
-        echo "Copying bootstrap-built libraries..."
-        if [ -d tmp-bootstrap/usr/lib ]; then
-          cp -v tmp-bootstrap/usr/lib/*.so* release/lib/ 2>/dev/null || true
-        fi
-        
-        # List what we've collected
-        echo ""
-        echo "Bundled libraries:"
-        ls -lh release/lib/
+        echo "Verifying GLIBC compatibility:"
+        ldd release/bin/kcat | grep GLIBC || true
         
         # Create wrapper script
         cat > release/kcat << 'EOF'
         #!/bin/bash
-        # kcat wrapper script with bundled dependencies
+        # kcat wrapper script
         
         # Get the directory where this script is located
         SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-        
-        # Set LD_LIBRARY_PATH to include our bundled libraries
-        export LD_LIBRARY_PATH="${SCRIPT_DIR}/lib:${LD_LIBRARY_PATH}"
         
         # Execute the actual kcat binary with all arguments
         exec "${SCRIPT_DIR}/bin/kcat" "$@"
@@ -144,33 +126,27 @@ jobs:
         
         # Create version info file
         cat > release/VERSION.txt << 'EOF'
-        kcat Portable Binary for CentOS 7
-        ==================================
+        kcat Binary for CentOS 7
+        =========================
         Version: ${VERSION}
         Build Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
         Git Commit: ${GITHUB_SHA:0:8}
         Git Branch: ${GITHUB_REF#refs/heads/}
         Architecture: x86_64
-        Package Type: Portable (with bundled dependencies)
+        Build Environment: CentOS 7 (GLIBC 2.17)
         
-        This package includes kcat and all required shared libraries,
-        making it portable across CentOS 7 and compatible systems.
-        
-        System Requirements:
+        This binary is built on CentOS 7 and compatible with:
         - CentOS 7 / RHEL 7 or compatible (x86_64)
         - Linux kernel 3.10 or later
-        - Basic system libraries (glibc, libm, libpthread, etc.)
+        - GLIBC 2.17 or later
         
         Quick Start:
-          tar -xzf kcat-centos7-portable-*.tar.gz
-          cd kcat-centos7-portable
+          tar -xzf kcat-centos7-*.tar.gz
+          cd kcat-centos7
           ./kcat -V
         
         Installation (optional):
           sudo ./install.sh
-        
-        The wrapper script automatically sets LD_LIBRARY_PATH to use
-        the bundled libraries, so no system-wide installation is required.
         
         For full documentation, visit:
         https://github.com/edenhill/kcat
@@ -219,7 +195,7 @@ jobs:
         mkdir -p "$INSTALL_DIR/$PACKAGE_NAME"
         
         # Copy all files
-        cp -r bin lib kcat "$INSTALL_DIR/$PACKAGE_NAME/"
+        cp -r bin kcat "$INSTALL_DIR/$PACKAGE_NAME/"
         [ -f VERSION.txt ] && cp VERSION.txt "$INSTALL_DIR/$PACKAGE_NAME/" || true
         [ -f README.md ] && cp README.md "$INSTALL_DIR/$PACKAGE_NAME/" || true
         [ -f LICENSE ] && cp LICENSE "$INSTALL_DIR/$PACKAGE_NAME/" || true
@@ -282,16 +258,15 @@ jobs:
         
         # Create README
         cat > release/README_INSTALL.txt << 'EOF'
-        kcat - CentOS 7 Portable Package
-        =================================
+        kcat - CentOS 7 Binary Package
+        ===============================
         
-        This package contains kcat and all required dependencies for CentOS 7.
+        This package contains kcat built on CentOS 7 with GLIBC 2.17 compatibility.
         
         Files:
         ---------
-        kcat            - Wrapper script (auto-sets library path)
+        kcat            - Wrapper script
         bin/kcat        - Actual binary file
-        lib/            - All required shared libraries
         install.sh      - Installation script (installs to /usr/local)
         uninstall.sh    - Uninstallation script
         VERSION.txt     - Version and build information
@@ -312,12 +287,6 @@ jobs:
         Uninstall:
         $ sudo ./uninstall.sh
         
-        How it works:
-        ---------
-        The kcat wrapper script automatically sets LD_LIBRARY_PATH to use
-        the bundled libraries instead of system libraries, so no system
-        dependencies need to be installed.
-        
         Common commands:
         -------------
         # Check version
@@ -335,12 +304,11 @@ jobs:
         # Show help
         ./kcat -h
         
-        Troubleshooting:
-        ---------
-        If you encounter "error while loading shared libraries":
-        1. Make sure to use the wrapper script ./kcat not bin/kcat
-        2. Check that lib/ directory contains all library files
-        3. Try manually setting: export LD_LIBRARY_PATH=$(pwd)/lib:$LD_LIBRARY_PATH
+        System Requirements:
+        -------------------
+        - CentOS 7 / RHEL 7 or compatible (x86_64)
+        - GLIBC 2.17 or later (CentOS 7 default)
+        - Standard system libraries
         
         For more information see README.md or visit:
         https://github.com/edenhill/kcat
@@ -348,14 +316,14 @@ jobs:
         
         # Create the tarball
         cd release
-        TARBALL_NAME="kcat-centos7-portable-${GITHUB_SHA:0:8}.tar.gz"
+        TARBALL_NAME="kcat-centos7-${GITHUB_SHA:0:8}.tar.gz"
         tar -czf "../$TARBALL_NAME" .
         cd ..
         
         # Display package info
         echo ""
         echo "=========================================="
-        echo "Portable package created successfully!"
+        echo "Package created successfully!"
         echo "=========================================="
         ls -lh "$TARBALL_NAME"
         echo ""
@@ -374,9 +342,9 @@ jobs:
     - name: Upload binary artifact
       uses: actions/upload-artifact@v4
       with:
-        name: kcat-centos7-portable-package
+        name: kcat-centos7-package
         path: |
-          kcat-centos7-portable-*.tar.gz
+          kcat-centos7-*.tar.gz
         retention-days: 90
         compression-level: 6
     
@@ -384,42 +352,35 @@ jobs:
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
-        files: kcat-centos7-portable-*.tar.gz
+        files: kcat-centos7-*.tar.gz
         body: |
-          ## CentOS 7 Portable Binary Release
+          ## CentOS 7 Binary Release
           
-          This release includes a portable kcat package with all required dependencies bundled.
+          This release includes kcat built on CentOS 7 with GLIBC 2.17 compatibility.
           
           ### Download and Install
           ```bash
-          # 下载并解压
-          tar -xzf kcat-centos7-portable-*.tar.gz
-          cd kcat-centos7-portable
+          # Download and extract
+          tar -xzf kcat-centos7-*.tar.gz
+          cd kcat-centos7
           
-          # 方式1: 直接使用（推荐）
+          # Method 1: Direct use (recommended)
           ./kcat -V
           ./kcat -b broker:9092 -L
           
-          # 方式2: 安装到系统
+          # Method 2: Install to system
           sudo ./install.sh
           ```
           
           ### Features
-          - ✅ 包含所有依赖库，无需额外安装
-          - ✅ 支持 CentOS 7 及兼容系统
-          - ✅ 包含完整功能（JSON, Avro, Transactions）
-          - ✅ 可在离线环境使用
-          - ✅ 使用包装脚本自动设置库路径
+          - ✅ Built on CentOS 7 (GLIBC 2.17)
+          - ✅ Compatible with CentOS 7 and later systems
+          - ✅ Full functionality (JSON, Avro, Transactions)
+          - ✅ No additional dependencies required
           
-          ### Package Contents
-          - `kcat` - Wrapper script with automatic library path setup
-          - `bin/kcat` - The actual kcat binary
-          - `lib/` - All required shared libraries
-          - `install.sh` - System installation script
-          - `uninstall.sh` - Uninstallation script
-          
-          ### How It Works
-          The wrapper script automatically sets `LD_LIBRARY_PATH` to use the bundled libraries,
-          making the package fully portable without requiring system-wide library installation.
+          ### System Requirements
+          - CentOS 7 / RHEL 7 or compatible (x86_64)
+          - GLIBC 2.17 or later (CentOS 7 default)
+          - Linux kernel 3.10 or later
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
